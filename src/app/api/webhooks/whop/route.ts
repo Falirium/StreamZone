@@ -20,10 +20,10 @@ function verifySignature(rawBody: string, signature: string, secret: string): bo
     }
 
     const hmac = crypto.createHmac('sha256', secret);
-    const computed = hmac.update(rawBody).digest('hex');
+    const computed = hmac.update(rawBody).digest('base64');
 
-    const expectedBuffer = Buffer.from(computed, 'hex');
-    const signatureBuffer = Buffer.from(signatureHash, 'hex');
+    const expectedBuffer = Buffer.from(computed, 'base64');
+    const signatureBuffer = Buffer.from(signatureHash, 'base64');
 
     if (expectedBuffer.length !== signatureBuffer.length) {
       return false;

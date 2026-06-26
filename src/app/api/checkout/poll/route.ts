@@ -24,13 +24,39 @@ export async function GET(request: NextRequest) {
       },
     });
 
-    if (!payment) {
+    // 2. Check for any recently assigned access code (created in the last 3 minutes)
+    const recentCode = await db.accessCode.findFirst({
+      where: {
+        assignedTo: session.email,
+        status: 'assigned',
+        createdAt: {
+          gte: new Date(Date.now() - 3 * 60 * 1000), // last 3 minutes
+        },
+      },
+      include: {
+        plan: true,
+      },
+    });
+
+    // 3. Check for any recently created active entitlement (created in the last 3 minutes)
+    const recentEntitlement = await db.accessEntitlement.findFirst({
+      where: {
+        userId: session.userId,
+        createdAt: {
+          gte: new Date(Date.now() - 3 * 60 * 1000), // last 3 minutes
+        },
+      },
+    });
+
+    const isSuccessful = !!(payment || recentCode || recentEntitlement);
+
+    if (!isSuccessful) {
       // Webhook hasn't processed yet
       return NextResponse.json({ status: 'pending' });
     }
 
-    // 2. Look for any assigned code for this user/email
-    const code = await db.accessCode.findFirst({
+    // 4. Look for any assigned code for this user/email (either the recent one or any older assigned ones)
+    const code = recentCode || await db.accessCode.findFirst({
       where: {
         assignedTo: session.email,
         status: 'assigned',
