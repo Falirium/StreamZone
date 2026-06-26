@@ -42,6 +42,7 @@ export default async function PayWhopPage({ searchParams }: Props) {
         price={price} 
         userId={session.userId} 
         userPhone={session.phone} 
+        userEmail={session.email}
         hasWhopKey={hasWhopKey}
       />
     </div>

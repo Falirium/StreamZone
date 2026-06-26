@@ -23,10 +23,11 @@ interface Props {
   price: Price;
   userId: string;
   userPhone: string;
+  userEmail: string;
   hasWhopKey: boolean;
 }
 
-export function WhopClient({ plan, price, userId, userPhone, hasWhopKey }: Props) {
+export function WhopClient({ plan, price, userId, userPhone, userEmail, hasWhopKey }: Props) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -48,9 +49,8 @@ export function WhopClient({ plan, price, userId, userPhone, hasWhopKey }: Props
           setLoading(false);
         }
       } else {
-        // Smart fallback way: Direct Link Checkout with prefilled phone number as email
-        const cleanPhone = encodeURIComponent(userPhone.replace(/\s+/g, ''));
-        const directCheckoutUrl = `https://whop.com/checkout/${price.whopPlanId}?email=${cleanPhone}@streamzone.local`;
+        // Direct Link Checkout with user's real email pre-filled to prevent mismatches
+        const directCheckoutUrl = `https://whop.com/checkout/${price.whopPlanId}?email=${encodeURIComponent(userEmail)}`;
         window.location.href = directCheckoutUrl;
       }
     } catch (err: any) {
