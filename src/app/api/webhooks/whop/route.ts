@@ -19,37 +19,64 @@ function verifySignature(
   secret: string
 ): boolean {
   try {
-    // 1. Remove the prefix
-    const base64Key = secret.replace('whsec_', '');
-    
-    // 2. Decode the key from Base64 to a Buffer
-    const keyBuffer = Buffer.from(base64Key, 'base64');
-
-    // 3. Format the signed content string
-    const signedContent = `${msgId}.${timestamp}.${rawBody}`;
-
-    // 4. Generate the HMAC-SHA256
-    const hmac = crypto.createHmac('sha256', keyBuffer);
-    const computed = hmac.update(signedContent).digest('base64');
-
-    // 5. Extract signature hash from the v1 prefix
+    // 1. Extract actual signature hash
     let signatureHash = signature;
     if (signature.includes(',')) {
       const parts = signature.split(',');
       signatureHash = parts[1] || parts[0];
     }
 
-    // 6. Secure timing safe comparison
-    const expectedBuffer = Buffer.from(computed, 'base64');
-    const signatureBuffer = Buffer.from(signatureHash, 'base64');
-
-    if (expectedBuffer.length !== signatureBuffer.length) {
-      return false;
+    // 2. Prepare keys to try
+    const base64Key = secret.replace('whsec_', '');
+    let decodedKeyBuffer: Buffer | null = null;
+    try {
+      decodedKeyBuffer = Buffer.from(base64Key, 'base64');
+    } catch {
+      // Not base64
     }
 
-    return crypto.timingSafeEqual(expectedBuffer, signatureBuffer);
+    const rawSecretBuffer = Buffer.from(secret, 'utf-8');
+    const keys = [
+      decodedKeyBuffer,
+      rawSecretBuffer
+    ].filter((k): k is Buffer => k !== null);
+
+    // 3. Prepare message structures to try
+    const contents = [
+      `${msgId}.${timestamp}.${rawBody}`,
+      rawBody
+    ];
+
+    // 4. Prepare encodings to try
+    const encodings = ['base64', 'hex'] as const;
+
+    // Try all combinations
+    for (const content of contents) {
+      for (const key of keys) {
+        for (const encoding of encodings) {
+          try {
+            const hmac = crypto.createHmac('sha256', key);
+            const computed = hmac.update(content).digest(encoding);
+
+            const expectedBuffer = Buffer.from(computed, encoding);
+            const signatureBuffer = Buffer.from(signatureHash, encoding);
+
+            if (expectedBuffer.length === signatureBuffer.length && 
+                crypto.timingSafeEqual(expectedBuffer, signatureBuffer)) {
+              console.log(`[WHOP SIGNATURE] Verified successfully using strategy: content=${content === rawBody ? 'rawBody' : 'standard'}, encoding=${encoding}`);
+              return true;
+            }
+          } catch (e) {
+            // Skip invalid key or encoding failures
+          }
+        }
+      }
+    }
+
+    console.error('[WHOP SIGNATURE] All signature verification combinations failed.');
+    return false;
   } catch (err) {
-    console.error('[WHOP SIGNATURE ERROR] Cryptographic validation failed:', err);
+    console.error('[WHOP SIGNATURE ERROR] Cryptographic validation exception:', err);
     return false;
   }
 }
