@@ -11,20 +11,52 @@ function generateCode(): string {
     .slice(0, ACCESS_CODE_LENGTH);
 }
 
+function verifySignature(rawBody: string, signature: string, secret: string): boolean {
+  try {
+    let signatureHash = signature;
+    if (signature.includes(',')) {
+      const parts = signature.split(',');
+      signatureHash = parts[1] || parts[0];
+    }
+
+    const hmac = crypto.createHmac('sha256', secret);
+    const computed = hmac.update(rawBody).digest('hex');
+
+    const expectedBuffer = Buffer.from(computed, 'hex');
+    const signatureBuffer = Buffer.from(signatureHash, 'hex');
+
+    if (expectedBuffer.length !== signatureBuffer.length) {
+      return false;
+    }
+
+    return crypto.timingSafeEqual(expectedBuffer, signatureBuffer);
+  } catch (err) {
+    console.error('[WHOP SIGNATURE ERROR]', err);
+    return false;
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
     const signature = request.headers.get('x-whop-signature') || 
                       request.headers.get('webhook-signature') || 
                       request.headers.get('x-signature');
-    const body = await request.json();
+    const rawBody = await request.text();
+    const body = JSON.parse(rawBody);
 
     console.log('[WHOP WEBHOOK] Received payload:', JSON.stringify(body, null, 2));
 
     // For production security, verify signature if WHOP_WEBHOOK_SECRET is set
     const webhookSecret = process.env.WHOP_WEBHOOK_SECRET;
-    if (webhookSecret && !signature) {
-      console.warn('[WHOP WEBHOOK] Rejected: WHOP_WEBHOOK_SECRET is set but no signature header was found.');
-      return NextResponse.json({ error: 'Missing signature' }, { status: 401 });
+    if (webhookSecret) {
+      if (!signature) {
+        console.warn('[WHOP WEBHOOK] Rejected: WHOP_WEBHOOK_SECRET is set but no signature header was found.');
+        return NextResponse.json({ error: 'Missing signature' }, { status: 401 });
+      }
+      if (!verifySignature(rawBody, signature, webhookSecret)) {
+        console.warn('[WHOP WEBHOOK] Rejected: Signature verification failed.');
+        return NextResponse.json({ error: 'Invalid signature' }, { status: 401 });
+      }
     }
 
     // Determine event action
@@ -34,7 +66,7 @@ export async function POST(request: NextRequest) {
     }
 
     // We specifically care about payment.succeeded or membership.created
-    if (action !== 'payment.succeeded' && action !== 'membership.created' && action !== 'membership.active') {
+    if (action !== 'payment.succeeded' && action !== 'membership.created' && action !== 'membership.active' && action !== 'membership.activated' && action !== 'membership.went_valid') {
       return NextResponse.json({ message: 'Event ignored' });
     }
 
@@ -48,7 +80,14 @@ export async function POST(request: NextRequest) {
     let phone = metadata.phone || metadata.userPhone;
 
     // Check for email-prefilled phone fallback (e.g. +1234567890@streamzone.local)
-    const email = data.email || data.membership?.email || data.membership?.user?.email || body.email || '';
+    const email = 
+      data.customer_email || 
+      data.user?.email || 
+      data.email || 
+      data.membership?.email || 
+      data.membership?.user?.email || 
+      body.email || 
+      '';
     if (!phone && email && (email.endsWith('@streamzone.local') || email.endsWith('@streamzone.com'))) {
       phone = decodeURIComponent(email.split('@')[0]);
       console.log(`[WHOP WEBHOOK] Extracted phone ${phone} from prefilled email: ${email}`);

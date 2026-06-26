@@ -3,11 +3,26 @@ import { db } from '@/lib/db';
 import Link from 'next/link';
 import { StatusBadge, getStatusVariant } from '@/components/ui/status-badge';
 import { logoutAction } from './actions';
+import { WhopPollStatus } from './poll-client';
 
 export const metadata = { title: 'My Access — StreamZone' };
 
-export default async function MyAccessPage() {
+interface Props {
+  searchParams: Promise<{
+    receipt_id?: string;
+    payment_id?: string;
+    checkout_status?: string;
+    status?: string;
+    state_id?: string;
+  }>;
+}
+
+export default async function MyAccessPage({ searchParams }: Props) {
   const session = await requireUser();
+  const { receipt_id, payment_id, checkout_status, status } = await searchParams;
+
+  const payId = payment_id || receipt_id;
+  const showPoll = payId && (checkout_status === 'success' || status === 'success');
 
   const [entitlements, payments, assignedCodes] = await Promise.all([
     db.accessEntitlement.findMany({
@@ -48,6 +63,8 @@ export default async function MyAccessPage() {
 
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+      {showPoll && payId && <WhopPollStatus paymentId={payId} />}
+
       <div className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-3xl font-bold mb-2">My Access</h1>

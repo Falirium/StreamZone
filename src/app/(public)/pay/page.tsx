@@ -52,9 +52,26 @@ export default async function PayPage({ searchParams }: Props) {
     ? countryOperators 
     : operators.filter((op) => op.assignments.length === 0);
 
+  // Check if there is an existing pending payment for this user, amount and currency within the last 1 hour
+  const existingPendingPayment = await db.payment.findFirst({
+    where: {
+      userId: session.userId,
+      amount: price.amount,
+      currency: price.currency,
+      method: 'WhatsApp',
+      status: 'pending',
+      createdAt: {
+        gte: new Date(Date.now() - 60 * 60 * 1000), // 1 hour
+      },
+    },
+    orderBy: {
+      createdAt: 'desc',
+    },
+  });
+
   let selectedOperator = null;
   let operatorLink = null;
-  let txnRef = `TXN-${Math.random().toString(36).substring(2, 11).toUpperCase()}`;
+  let txnRef = existingPendingPayment?.reference || `TXN-${Math.random().toString(36).substring(2, 11).toUpperCase()}`;
 
   if (activePool.length > 0) {
     // 2. Perform Weighted Random Routing
@@ -99,17 +116,19 @@ export default async function PayPage({ searchParams }: Props) {
   }
 
   if (operatorLink) {
-    // Create the pending payment record in database
-    await db.payment.create({
-      data: {
-        userId: session.userId,
-        amount: price.amount,
-        currency: price.currency,
-        method: 'WhatsApp',
-        reference: txnRef,
-        status: 'pending',
-      },
-    });
+    if (!existingPendingPayment) {
+      // Create the pending payment record in database only if we are not reusing an existing one
+      await db.payment.create({
+        data: {
+          userId: session.userId,
+          amount: price.amount,
+          currency: price.currency,
+          method: 'WhatsApp',
+          reference: txnRef,
+          status: 'pending',
+        },
+      });
+    }
 
     // Redirect directly to the WhatsApp chat link
     redirect(operatorLink);
