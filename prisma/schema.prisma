@@ -1,0 +1,276 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ── Auth & Users ──────────────────────────
+model Admin {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  passwordHash  String
+  name          String
+  role          String   @default("admin")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  auditLogs     AuditLog[]
+}
+
+model User {
+  id               String            @id @default(cuid())
+  phone            String?           @unique
+  email            String            @unique
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  profile          CustomerProfile?
+  payments         Payment[]
+  redemptions      Redemption[]
+  entitlements     AccessEntitlement[]
+  supportCases     SupportCase[]
+  otps             UserOtp[]
+  playbackSessions PlaybackSession[]
+  pushSubscriptions PushSubscription[]
+}
+
+model CustomerProfile {
+  id            String   @id @default(cuid())
+  userId        String   @unique
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  displayName   String?
+  email         String?
+  countryId     String?
+  country       Country? @relation(fields: [countryId], references: [id])
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model UserOtp {
+  id        String   @id @default(cuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  email     String
+  code      String
+  expiresAt DateTime
+  verified  Boolean  @default(false)
+  attempts  Int      @default(0)
+  ipAddress String?
+  createdAt DateTime @default(now())
+
+  @@index([email, code])
+}
+
+// ── Catalog ───────────────────────────────
+model Country {
+  id                  String               @id @default(cuid())
+  name                String               @unique
+  code                String               @unique
+  currency            String
+  paymentNotes        String?
+  isActive            Boolean              @default(true)
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  profiles            CustomerProfile[]
+  prices              Price[]
+  whatsappAssignments OperatorAssignment[]
+}
+
+model Plan {
+  id            String   @id @default(cuid())
+  name          String
+  description   String?
+  durationDays  Int
+  maxDevices    Int      @default(1)
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  prices        Price[]
+  accessCodes   AccessCode[]
+  entitlements  AccessEntitlement[]
+}
+
+model Event {
+  id              String   @id @default(cuid())
+  title           String
+  description     String?
+  slug            String   @unique
+  category        String
+  startsAt        DateTime
+  endsAt          DateTime?
+  posterUrl       String?
+  isActive        Boolean  @default(true)
+  isFeatured      Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  playbackSources PlaybackSource[]
+  accessCodes     AccessCode[]
+  entitlements    AccessEntitlement[]
+}
+
+model Price {
+  id         String   @id @default(cuid())
+  planId     String
+  plan       Plan     @relation(fields: [planId], references: [id], onDelete: Cascade)
+  countryId  String
+  country    Country  @relation(fields: [countryId], references: [id], onDelete: Cascade)
+  amount     Decimal  @db.Decimal(10, 2)
+  currency   String
+  whopPlanId String?
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([planId, countryId])
+}
+
+// ── Payments & Access ─────────────────────
+model Payment {
+  id         String    @id @default(cuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  amount     Decimal   @db.Decimal(10, 2)
+  currency   String
+  method     String?
+  reference  String?
+  proofUrl   String?
+  status     String    @default("pending")
+  reviewedBy String?
+  reviewedAt DateTime?
+  reviewNote String?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+}
+
+model AccessCode {
+  id         String      @id @default(cuid())
+  code       String      @unique
+  planId     String
+  plan       Plan        @relation(fields: [planId], references: [id])
+  eventId    String?
+  event      Event?      @relation(fields: [eventId], references: [id])
+  status     String      @default("available")
+  assignedTo String?
+  createdBy  String?
+  createdAt  DateTime    @default(now())
+  expiresAt  DateTime?
+  redemption Redemption?
+}
+
+model Redemption {
+  id            String             @id @default(cuid())
+  userId        String
+  user          User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  codeId        String             @unique
+  code          AccessCode         @relation(fields: [codeId], references: [id])
+  redeemedAt    DateTime           @default(now())
+  entitlementId String?            @unique
+  entitlement   AccessEntitlement? @relation(fields: [entitlementId], references: [id])
+}
+
+model AccessEntitlement {
+  id         String      @id @default(cuid())
+  userId     String
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  planId     String
+  plan       Plan        @relation(fields: [planId], references: [id])
+  eventId    String?
+  event      Event?      @relation(fields: [eventId], references: [id])
+  startsAt   DateTime    @default(now())
+  expiresAt  DateTime
+  isActive   Boolean     @default(true)
+  createdAt  DateTime    @default(now())
+  redemption Redemption?
+}
+
+// ── Playback (streamed.pk integration) ────
+model PlaybackSource {
+  id             String   @id @default(cuid())
+  eventId        String
+  event          Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  matchId        String
+  sourceProvider String
+  sourceMatchId  String
+  priority       Int      @default(0)
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+// ── Support & Audit ───────────────────────
+model SupportCase {
+  id         String   @id @default(cuid())
+  userId     String?
+  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  subject    String
+  message    String
+  status     String   @default("open")
+  adminNote  String?
+  resolvedBy String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  adminId   String?
+  admin     Admin?   @relation(fields: [adminId], references: [id], onDelete: SetNull)
+  action    String
+  entity    String
+  entityId  String
+  details   Json?
+  ipAddress String?
+  createdAt DateTime @default(now())
+}
+
+model WhatsAppOperator {
+  id            String               @id @default(cuid())
+  phoneNumber   String
+  displayName   String
+  isActive      Boolean              @default(true)
+  defaultWeight Int                  @default(1)
+  templateText  String?              // Dynamic text with template placeholders
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+  assignments   OperatorAssignment[]
+}
+
+model OperatorAssignment {
+  id           String           @id @default(cuid())
+  operatorId   String
+  operator     WhatsAppOperator @relation(fields: [operatorId], references: [id], onDelete: Cascade)
+  countryId    String
+  country      Country          @relation(fields: [countryId], references: [id], onDelete: Cascade)
+  customWeight Int?
+
+  @@unique([operatorId, countryId])
+}
+
+model PlaybackSession {
+  id          String   @id @default(cuid())
+  userId      String
+  sessionId   String
+  lastActive  DateTime @default(now())
+  createdAt   DateTime @default(now())
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, sessionId])
+  @@index([userId])
+}
+
+model PushSubscription {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+}
+
+
