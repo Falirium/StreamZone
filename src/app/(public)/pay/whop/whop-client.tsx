@@ -43,14 +43,16 @@ export function WhopClient({ plan, price, userId, userPhone, userEmail, hasWhopK
         // Official way: Create dynamic checkout configuration via Whop API
         const result = await createWhopCheckoutSession(plan.id, price.whopPlanId, userId, userPhone, window.location.origin);
         if (result.success && result.checkoutUrl) {
-          window.location.href = result.checkoutUrl;
+          const separator = result.checkoutUrl.includes('?') ? '&' : '?';
+          const prefilledUrl = `${result.checkoutUrl}${separator}email=${encodeURIComponent(userEmail)}&email.disabled=1`;
+          window.location.href = prefilledUrl;
         } else {
           setError(result.error || 'Failed to initialize secure checkout session');
           setLoading(false);
         }
       } else {
-        // Direct Link Checkout with user's real email pre-filled to prevent mismatches
-        const directCheckoutUrl = `https://whop.com/checkout/${price.whopPlanId}?email=${encodeURIComponent(userEmail)}`;
+        // Direct Link Checkout with user's real email pre-filled and locked to prevent mismatches
+        const directCheckoutUrl = `https://whop.com/checkout/${price.whopPlanId}?email=${encodeURIComponent(userEmail)}&email.disabled=1`;
         window.location.href = directCheckoutUrl;
       }
     } catch (err: any) {

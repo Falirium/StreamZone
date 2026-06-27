@@ -232,7 +232,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Plan/Price mapping not found' }, { status: 404 });
     }
 
-    const txnRef = data.id || `WHOP-WH-${Math.random().toString(36).substring(2, 11).toUpperCase()}`;
+    // Unify all Whop events (payments and memberships) under the unique Membership ID to prevent double code provisioning.
+    const membershipId = data.membership_id || data.membership?.id || (action.startsWith('membership') ? data.id : null);
+    const txnRef = membershipId || data.id || `WHOP-WH-${Math.random().toString(36).substring(2, 11).toUpperCase()}`;
 
     // 3. Process database transaction (Payment & Access Code generation)
     try {

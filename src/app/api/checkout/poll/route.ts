@@ -105,6 +105,9 @@ export async function GET(request: NextRequest) {
             
             const whopEmail = whopData.email || whopData.user?.email || '';
             const sessionEmail = session.email;
+            
+            // Resolve unified Membership ID reference
+            const membershipId = whopData.membership_id || whopData.membership?.id || whopData.id;
 
             // Normalize emails for comparison
             if (whopEmail && whopEmail.toLowerCase() !== sessionEmail.toLowerCase()) {
@@ -112,51 +115,63 @@ export async function GET(request: NextRequest) {
               explicitError = 'EMAIL_MISMATCH';
               whopEmailAddress = whopEmail;
             } else {
-              // Self-healing: if the emails match and the membership/payment is valid/active, let's provision the payment & code now!
-              const statusValue = whopData.status || '';
-              const validStatuses = ['active', 'valid', 'completed', 'went_valid', 'trialing', 'paid', 'succeeded'];
-              if (validStatuses.includes(statusValue.toLowerCase()) || whopData.active === true) {
-                console.log('[CHECKOUT POLL] Whop membership is active and email matches. Triggering self-healing database write...');
-                
-                // Let's resolve the plan mapping
-                const whopPlanId = whopData.plan_id || whopData.plan?.id;
-                let price = null;
-                let plan = null;
-                if (whopPlanId) {
-                  price = await db.price.findFirst({
-                    where: { whopPlanId },
-                    include: { plan: true },
-                  });
-                  if (price) plan = price.plan;
-                }
+              // Check if database already has a payment record with the membershipId (e.g. created by webhook)
+              const existingRecord = await db.payment.findFirst({
+                where: {
+                  userId: session.userId,
+                  reference: membershipId,
+                },
+              });
 
-                if (!plan) {
-                  // Fallback: use first active plan
-                  plan = await db.plan.findFirst({ where: { isActive: true }, orderBy: { createdAt: 'asc' } });
-                }
+              if (existingRecord) {
+                console.log('[CHECKOUT POLL] Payment already found in database under membership ID reference:', membershipId);
+                isSuccessful = true;
+              } else {
+                // Self-healing: if the emails match and the membership/payment is valid/active, let's provision the payment & code now!
+                const statusValue = whopData.status || '';
+                const validStatuses = ['active', 'valid', 'completed', 'went_valid', 'trialing', 'paid', 'succeeded'];
+                if (validStatuses.includes(statusValue.toLowerCase()) || whopData.active === true) {
+                  console.log('[CHECKOUT POLL] Whop transaction is active and email matches. Triggering self-healing database write using membershipId:', membershipId);
+                  
+                  // Let's resolve the plan mapping
+                  const whopPlanId = whopData.plan_id || whopData.plan?.id;
+                  let price = null;
+                  let plan = null;
+                  if (whopPlanId) {
+                    price = await db.price.findFirst({
+                      where: { whopPlanId },
+                      include: { plan: true },
+                    });
+                    if (price) plan = price.plan;
+                  }
 
-                if (plan) {
-                  // Log the payment and assign/redeem the code in a single transaction
-                  try {
-                    const result = await db.$transaction(async (tx) => {
-                      // Double check if payment already logged (idempotency)
-                      const existingPayment = await tx.payment.findFirst({
-                        where: { reference: paymentId },
-                      });
-                      if (existingPayment) {
-                        return { alreadyProcessed: true };
-                      }
+                  if (!plan) {
+                    // Fallback: use first active plan
+                    plan = await db.plan.findFirst({ where: { isActive: true }, orderBy: { createdAt: 'asc' } });
+                  }
 
-                      await tx.payment.create({
-                        data: {
-                          userId: session.userId,
-                          amount: price?.amount || 0.00,
-                          currency: price?.currency || 'USD',
-                          method: 'Whop API (Self-Healed)',
-                          reference: paymentId,
-                          status: 'approved',
-                        },
-                      });
+                  if (plan) {
+                    // Log the payment and assign/redeem the code in a single transaction
+                    try {
+                      const result = await db.$transaction(async (tx) => {
+                        // Double check if payment already logged (idempotency)
+                        const existingPayment = await tx.payment.findFirst({
+                          where: { reference: membershipId },
+                        });
+                        if (existingPayment) {
+                          return { alreadyProcessed: true };
+                        }
+
+                        await tx.payment.create({
+                          data: {
+                            userId: session.userId,
+                            amount: price?.amount || 0.00,
+                            currency: price?.currency || 'USD',
+                            method: 'Whop API (Self-Healed)',
+                            reference: membershipId,
+                            status: 'approved',
+                          },
+                        });
 
                       // Create and redeem code
                       const accessCode = await tx.accessCode.create({
@@ -205,9 +220,10 @@ export async function GET(request: NextRequest) {
                 }
               }
             }
-          } else {
-            console.warn('[CHECKOUT POLL] Whop API membership lookup returned status:', whopRes.status);
           }
+        } else {
+          console.warn('[CHECKOUT POLL] Whop API membership lookup returned status:', whopRes.status);
+        }
         } catch (whopApiErr) {
           console.error('[CHECKOUT POLL] Failed to poll Whop API directly:', whopApiErr);
         }
