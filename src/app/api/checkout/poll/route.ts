@@ -91,7 +91,9 @@ export async function GET(request: NextRequest) {
       if (whopApiKey) {
         const whopApiBase = process.env.WHOP_API_URL || 'https://api.whop.com/api/v1';
         try {
-          const whopRes = await fetch(`${whopApiBase}/memberships/${paymentId}`, {
+          const isPayment = paymentId.startsWith('pay_') || paymentId.startsWith('payment_');
+          const endpoint = isPayment ? `payments/${paymentId}` : `memberships/${paymentId}`;
+          const whopRes = await fetch(`${whopApiBase}/${endpoint}`, {
             headers: {
               'Authorization': `Bearer ${whopApiKey}`,
             },
@@ -99,7 +101,7 @@ export async function GET(request: NextRequest) {
 
           if (whopRes.ok) {
             const whopData = await whopRes.json();
-            console.log('[CHECKOUT POLL] Fetched Whop membership directly:', JSON.stringify(whopData, null, 2));
+            console.log(`[CHECKOUT POLL] Fetched Whop ${isPayment ? 'payment' : 'membership'} directly:`, JSON.stringify(whopData, null, 2));
             
             const whopEmail = whopData.email || whopData.user?.email || '';
             const sessionEmail = session.email;
@@ -110,10 +112,10 @@ export async function GET(request: NextRequest) {
               explicitError = 'EMAIL_MISMATCH';
               whopEmailAddress = whopEmail;
             } else {
-              // Self-healing: if the emails match and the membership is valid/active, let's provision the payment & code now!
-              const membershipStatus = whopData.status || '';
-              const validStatuses = ['active', 'valid', 'completed', 'went_valid', 'trialing'];
-              if (validStatuses.includes(membershipStatus.toLowerCase()) || whopData.active === true) {
+              // Self-healing: if the emails match and the membership/payment is valid/active, let's provision the payment & code now!
+              const statusValue = whopData.status || '';
+              const validStatuses = ['active', 'valid', 'completed', 'went_valid', 'trialing', 'paid', 'succeeded'];
+              if (validStatuses.includes(statusValue.toLowerCase()) || whopData.active === true) {
                 console.log('[CHECKOUT POLL] Whop membership is active and email matches. Triggering self-healing database write...');
                 
                 // Let's resolve the plan mapping

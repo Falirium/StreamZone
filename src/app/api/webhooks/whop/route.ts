@@ -123,7 +123,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Determine event action
-    const action = body.action || body.event;
+    const action = body.action || body.event || body.type;
     if (!action) {
       console.error('[WHOP WEBHOOK] Ignored: Missing action/event field in payload.');
       return NextResponse.json({ error: 'Missing action/event' }, { status: 400 });
