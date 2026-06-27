@@ -3,6 +3,7 @@
 import { requireAdmin } from '@/lib/auth/admin-auth';
 import { logAudit } from '@/lib/audit';
 import type { AdminSessionData } from '@/types/api';
+import { Prisma } from '@prisma/client';
 
 interface ActionResult<T = unknown> {
   success: boolean;
@@ -43,10 +44,25 @@ export async function adminAction<T>(
       console.error('[AdminAction Error]:', error);
     }
     
-    // In production, only expose safe validation/auth messages, otherwise generalize
-    const clientMessage = isDev 
-      ? rawMessage 
-      : (rawMessage.startsWith('Unauthorized') ? rawMessage : 'An unexpected error occurred.');
+    let clientMessage = 'An unexpected error occurred.';
+    
+    if (error instanceof Prisma.PrismaClientKnownRequestError) {
+      if (error.code === 'P2002') {
+        const target = (error.meta?.target as string[]) || [];
+        const fieldName = target.join(', ');
+        clientMessage = `A record with this ${fieldName || 'unique value'} already exists.`;
+      } else if (error.code === 'P2025') {
+        clientMessage = 'The requested record was not found.';
+      } else {
+        clientMessage = isDev ? rawMessage : 'A database error occurred.';
+      }
+    } else if (error instanceof Error) {
+      if (rawMessage.startsWith('Unauthorized')) {
+        clientMessage = rawMessage;
+      } else if (isDev) {
+        clientMessage = rawMessage;
+      }
+    }
 
     return { success: false, error: clientMessage };
   }

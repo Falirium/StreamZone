@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { StreamEntry } from '@/lib/stream-provider';
 import { Button } from '@/components/ui/button';
+import { AdblockNotice } from './adblock-notice';
 
 export function PlayerClient({ streams, isPreview = false }: { streams: StreamEntry[]; isPreview?: boolean }) {
   // Try to default to an English HD stream, or just the first one
@@ -23,6 +24,8 @@ export function PlayerClient({ streams, isPreview = false }: { streams: StreamEn
 
   const offlineTimerRef = useRef<NodeJS.Timeout | null>(null);
   const sessionIdRef = useRef<string>('');
+
+  const iframeRef = useRef<HTMLIFrameElement>(null);
 
   useEffect(() => {
     // Generate or retrieve a unique session ID for this browser tab
@@ -189,6 +192,55 @@ export function PlayerClient({ streams, isPreview = false }: { streams: StreamEn
     };
   }, [isOffline, isEvicted, isPreview]);
 
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      // Prompt user to prevent malicious redirects from the iframe
+      e.preventDefault();
+      e.returnValue = 'Are you sure you want to leave? Popup redirects are blocked.';
+      return 'Are you sure you want to leave? Popup redirects are blocked.';
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    // Override window.open on parent window context immediately
+    const originalOpen = window.open;
+    window.open = function (url, name, specs) {
+      if (url) {
+        const urlStr = url.toString();
+        try {
+          const parsed = new URL(urlStr, window.location.href);
+          // Allow internal routes or identical domain links
+          if (parsed.origin === window.location.origin) {
+            return originalOpen.call(window, url, name, specs);
+          }
+        } catch (e) {
+          // If relative URL or parsing fail, check prefix
+          if (!urlStr.startsWith('http://') && !urlStr.startsWith('https://') && !urlStr.startsWith('//')) {
+            return originalOpen.call(window, url, name, specs);
+          }
+        }
+      }
+      console.warn('[Security Shield] Intercepted and neutralized window.open popup attempt to:', url);
+      // Return a dummy object with no-op methods to prevent script crashes in iframe
+      return {
+        focus: () => {},
+        blur: () => {},
+        close: () => {},
+        closed: true,
+        location: {
+          replace: () => {},
+          assign: () => {},
+          href: ''
+        }
+      } as unknown as Window;
+    };
+
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      window.open = originalOpen; // restore on unmount
+    };
+  }, []);
+
   const handleReload = () => {
     window.location.reload();
   };
@@ -259,6 +311,7 @@ export function PlayerClient({ streams, isPreview = false }: { streams: StreamEn
           <>
             {(!isPreview || !showUpgradeModal) ? (
               <iframe
+                ref={iframeRef}
                 src={activeStream.embedUrl}
                 className="absolute top-0 left-0 w-full h-full animate-in fade-in duration-500"
                 frameBorder="0"
@@ -321,6 +374,8 @@ export function PlayerClient({ streams, isPreview = false }: { streams: StreamEn
           </div>
         )}
       </div>
+
+      <AdblockNotice />
 
       {/* Stream Selector */}
       {streams.length > 1 && (
