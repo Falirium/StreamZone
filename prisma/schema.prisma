@@ -103,6 +103,7 @@ model Event {
   posterUrl       String?
   isActive        Boolean  @default(true)
   isFeatured      Boolean  @default(false)
+  pushSent        Boolean  @default(false)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   playbackSources PlaybackSource[]

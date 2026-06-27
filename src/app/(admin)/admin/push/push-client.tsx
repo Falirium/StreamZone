@@ -1,19 +1,26 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useTransition } from 'react';
 import type { Country } from '@prisma/client';
+import { sendPushEarly, UpcomingPushItem } from './actions';
 
 interface Props {
   countries: Country[];
+  initialQueue?: UpcomingPushItem[];
 }
 
-export function PushClient({ countries }: Props) {
+export function PushClient({ countries, initialQueue = [] }: Props) {
   // Form state
   const [title, setTitle] = useState('New Event Starting Now! 🚨');
   const [message, setMessage] = useState('Tune in live to watch the match of the day. Stream now in HD!');
   const [redirectUrl, setRedirectUrl] = useState('/events');
   const [targetFilter, setTargetFilter] = useState<'global' | 'country' | 'phone' | 'email'>('global');
   const [targetValue, setTargetValue] = useState('');
+
+  // Queue state
+  const [queue, setQueue] = useState<UpcomingPushItem[]>(initialQueue);
+  const [isPending, startTransition] = useTransition();
+  const [actionResult, setActionResult] = useState<{ success: boolean; message: string } | null>(null);
 
   // Status state
   const [isSending, setIsSending] = useState(false);
@@ -69,8 +76,35 @@ export function PushClient({ countries }: Props) {
     }
   };
 
+  const handleSendEarly = (eventId: string) => {
+    setActionResult(null);
+    startTransition(async () => {
+      try {
+        const res = await sendPushEarly(eventId);
+        if (res.success) {
+          setQueue((prev) => prev.filter((item) => item.eventId !== eventId));
+          setActionResult({
+            success: true,
+            message: res.data?.message || 'Notification dispatched successfully!',
+          });
+        } else {
+          setActionResult({
+            success: false,
+            message: res.error || 'Failed to dispatch notification.',
+          });
+        }
+      } catch (err: any) {
+        setActionResult({
+          success: false,
+          message: err.message || 'An unexpected error occurred.',
+        });
+      }
+    });
+  };
+
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+    <>
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
       {/* Compose Form: Left 7 Columns */}
       <div className="lg:col-span-7 bg-surface-800 border border-white/10 rounded-2xl p-6 shadow-xl relative overflow-hidden">
         <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500" />
@@ -376,5 +410,84 @@ export function PushClient({ countries }: Props) {
         </div>
       </div>
     </div>
+
+      {/* Upcoming Automated Promotions Queue */}
+      <div className="bg-surface-800 border border-white/10 rounded-2xl p-6 shadow-xl relative overflow-hidden mt-8">
+        <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-amber-500 to-orange-500" />
+        
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h2 className="text-lg font-bold text-white flex items-center gap-2">
+              <span>📋</span> Scheduled Automated Promotions
+            </h2>
+            <p className="text-white/60 text-xs mt-1">
+              Automated notifications scheduled for upcoming matches. They send automatically 30 minutes prior to kickoff.
+            </p>
+          </div>
+        </div>
+
+        {actionResult && (
+          <div className={`mb-6 p-4 rounded-xl border text-sm ${actionResult.success ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300' : 'bg-red-500/10 border-red-500/20 text-red-300'}`}>
+            {actionResult.message}
+          </div>
+        )}
+
+        {queue.length === 0 ? (
+          <div className="text-center py-10 border border-dashed border-white/10 rounded-xl bg-[#12141C]/50">
+            <span className="text-3xl">📭</span>
+            <p className="text-white/40 text-sm mt-3 font-medium">No upcoming scheduled promotions. Events are either complete or sent.</p>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {queue.map((item) => (
+              <div 
+                key={item.eventId} 
+                className="glass rounded-xl p-4 sm:p-5 flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between border border-white/5 hover:border-white/10 transition-all"
+              >
+                <div className="flex-1 space-y-3 min-w-0 w-full">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-brand-400 bg-brand-500/10 px-2 py-0.5 rounded border border-brand-500/20">
+                      {item.eventCategory}
+                    </span>
+                    <h3 className="text-sm font-extrabold text-white truncate">{item.eventTitle}</h3>
+                    <span className="text-[10px] text-white/40 font-mono">
+                      Kickoff: {new Date(item.startsAt).toLocaleString()}
+                    </span>
+                  </div>
+
+                  <div className="bg-black/20 border border-white/5 rounded-xl p-3 space-y-1.5">
+                    <div className="text-xs font-bold text-white/70">
+                      Preview: <span className="text-brand-300 font-extrabold">{item.compiledTitle}</span>
+                    </div>
+                    <p className="text-xs text-white/50 leading-relaxed font-sans select-all">{item.compiledBody}</p>
+                  </div>
+
+                  <div className="flex items-center gap-1.5 text-[10px] text-amber-400 font-bold">
+                    <span>⏰ Auto-Dispatch scheduled at:</span>
+                    <span className="font-mono bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.5 rounded">
+                      {new Date(item.sendScheduledAt).toLocaleString()}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="shrink-0 w-full sm:w-auto">
+                  <button
+                    onClick={() => handleSendEarly(item.eventId)}
+                    disabled={isPending}
+                    className="w-full sm:w-auto px-4 py-2 text-xs font-extrabold text-white bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-700 rounded-lg transition-all shadow-md shadow-indigo-600/15 cursor-pointer flex items-center justify-center gap-1.5"
+                  >
+                    {isPending ? (
+                      <span className="w-3.5 h-3.5 border border-white/30 border-t-white rounded-full animate-spin" />
+                    ) : (
+                      '⚡ Send Now'
+                    )}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </>
   );
 }

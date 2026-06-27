@@ -1,16 +1,22 @@
 import { db } from '@/lib/db';
 import { PushClient } from './push-client';
+import { getUpcomingQueue } from './actions';
 
 export const metadata = {
   title: 'Push Broadcast — Admin',
 };
 
 export default async function PushBroadcastPage() {
-  // Fetch active countries for target filtering
-  const countries = await db.country.findMany({
-    where: { isActive: true },
-    orderBy: { name: 'asc' },
-  });
+  // Fetch active countries and upcoming notifications queue
+  const [countries, queueResult] = await Promise.all([
+    db.country.findMany({
+      where: { isActive: true },
+      orderBy: { name: 'asc' },
+    }),
+    getUpcomingQueue(),
+  ]);
+
+  const upcomingQueue = queueResult.success ? queueResult.data || [] : [];
 
   return (
     <div className="space-y-6">
@@ -21,7 +27,7 @@ export default async function PushBroadcastPage() {
         </p>
       </div>
 
-      <PushClient countries={countries} />
+      <PushClient countries={countries} initialQueue={upcomingQueue} />
     </div>
   );
 }
